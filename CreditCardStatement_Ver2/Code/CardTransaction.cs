@@ -2,6 +2,8 @@
 {
   public sealed class CardTransaction
   {
+    /// <summary>명세월</summary>
+    public string StatementYearMonth { get; set; } = "";
     // 엑셀/리스트뷰 기준 컬럼들
 
     /// <summary>사용일</summary>
