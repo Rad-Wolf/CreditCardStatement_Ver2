@@ -2,6 +2,9 @@ namespace CreditCardStatement_Ver2.Code
 {
   internal static class ParseScorer
   {
+    /// <summary>
+    /// 파싱된 행 집합이 실제 카드 사용 내역 구조에 얼마나 가까운지 점수화합니다.
+    /// </summary>
     public static int ScoreRows(IReadOnlyList<string[]> rows, int skipRows)
     {
       int score = 0;
@@ -32,6 +35,9 @@ namespace CreditCardStatement_Ver2.Code
       return score;
     }
 
+    /// <summary>
+    /// 샘플 행을 분석해 열 번호별 추천 매핑을 생성합니다.
+    /// </summary>
     public static Dictionary<int, string> SuggestMappings(IReadOnlyList<string[]> rows, int skipRows)
     {
       Dictionary<int, string> mappings = new();
@@ -77,11 +83,17 @@ namespace CreditCardStatement_Ver2.Code
       return mappings;
     }
 
+    /// <summary>
+    /// 분석 결과에 특정 유형 플래그가 포함되어 있는지 확인합니다.
+    /// </summary>
     private static bool Has(CellValueKind value, CellValueKind flag)
     {
       return (value & flag) == flag;
     }
 
+    /// <summary>
+    /// 아직 배정되지 않은 열 중 점수가 가장 높은 열을 특정 필드에 연결합니다.
+    /// </summary>
     private static void AssignBest(
       IDictionary<int, string> mappings,
       IReadOnlyList<ColumnScore> scores,

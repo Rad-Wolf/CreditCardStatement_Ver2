@@ -6,21 +6,23 @@ namespace CreditCardStatement_Ver2.Forms
   {
     private static readonly string[] TargetFields =
     {
-      "\uC0AC\uC6A9 \uC548 \uD568",
-      "\uC774\uC6A9\uC77C\uC790",
-      "\uC774\uC6A9\uCE74\uB4DC",
-      "\uAD6C\uBD84",
-      "\uAC00\uB9F9\uC810",
-      "\uC774\uC6A9\uAE08\uC561",
-      "\uD560\uBD80\uAC1C\uC6D4",
-      "\uD68C\uCC28",
-      "\uC6D0\uAE08",
-      "\uC218\uC218\uB8CC",
-      "\uACB0\uC81C \uD6C4 \uC794\uC561"
+      "사용 안 함",
+      "이용일자",
+      "이용카드",
+      "구분",
+      "가맹점",
+      "이용금액",
+      "할부개월",
+      "회차",
+      "원금",
+      "수수료",
+      "결제 후 잔액"
     };
 
     private readonly string _clipboardText;
+    // 클립보드에서 파싱한 현재 미리보기 행들이다. 열 매핑 표와 샘플 툴팁 생성에도 같이 사용된다.
     private readonly List<string[]> _previewRows = new();
+    // 마지막으로 화면에 반영한 옵션 상태다. 카드사만 바꾸는 식의 부분 변경 시 기준값으로 재사용한다.
     private CardImportOptions _lastAppliedOptions = new();
     private bool _isRefreshing;
 
@@ -45,6 +47,9 @@ namespace CreditCardStatement_Ver2.Forms
 
     public CardImportOptions ImportOptions => BuildOptions();
 
+    /// <summary>
+    /// 클립보드 원본을 기반으로 가져오기 옵션 선택 창을 초기화합니다.
+    /// </summary>
     public CopyTypeSelectForm(string clipboardText)
     {
       _clipboardText = clipboardText;
@@ -56,6 +61,9 @@ namespace CreditCardStatement_Ver2.Forms
       RefreshPreview();
     }
 
+    /// <summary>
+    /// 미리보기와 옵션 갱신에 필요한 UI 이벤트를 연결합니다.
+    /// </summary>
     private void HookEvents()
     {
       _cardTypeComboBox.SelectedIndexChanged += CardTypeChanged;
@@ -81,26 +89,35 @@ namespace CreditCardStatement_Ver2.Forms
       _previewGrid.CellValueChanged += (_, _) => RefreshPreviewStyles();
     }
 
+    /// <summary>
+    /// 파서 모드 콤보박스에 지원하는 분류 방식을 채웁니다.
+    /// </summary>
     private void LoadParserModes()
     {
-      _parserModeComboBox.Items.Add(new ParserModeItem(CardParserMode.MultiLineRecord, "\uAC70\uB798 \uBB36\uC74C\uD615"));
-      _parserModeComboBox.Items.Add(new ParserModeItem(CardParserMode.Tabular, "\uD45C \uD615\uC2DD"));
-      _parserModeComboBox.Items.Add(new ParserModeItem(CardParserMode.ExcelLike, "\uC5D1\uC140\uC2DD"));
-      _parserModeComboBox.Items.Add(new ParserModeItem(CardParserMode.Auto, "\uC790\uB3D9"));
+      _parserModeComboBox.Items.Add(new ParserModeItem(CardParserMode.MultiLineRecord, "거래 묶음형"));
+      _parserModeComboBox.Items.Add(new ParserModeItem(CardParserMode.Tabular, "표 형식"));
+      _parserModeComboBox.Items.Add(new ParserModeItem(CardParserMode.ExcelLike, "엑셀식"));
+      _parserModeComboBox.Items.Add(new ParserModeItem(CardParserMode.Auto, "자동"));
       _parserModeComboBox.SelectedIndex = 0;
     }
 
+    /// <summary>
+    /// 카드사 콤보박스에 선택 가능한 카드 유형을 채웁니다.
+    /// </summary>
     private void LoadCardTypes()
     {
-      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.KB, "\uAD6D\uBBFC\uCE74\uB4DC"));
-      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.Shinhan, "\uC2E0\uD55C\uCE74\uB4DC"));
-      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.Hyundai, "\uD604\uB300\uCE74\uB4DC"));
-      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.NongHyup, "\uB18D\uD611\uCE74\uB4DC"));
-      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.Generic, "\uAE30\uD0C0"));
-      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.MessageBox, "\uBBF8\uB9AC\uBCF4\uAE30\uB9CC"));
+      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.KB, "국민카드"));
+      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.Shinhan, "신한카드"));
+      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.Hyundai, "현대카드"));
+      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.NongHyup, "농협카드"));
+      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.Generic, "기타"));
+      _cardTypeComboBox.Items.Add(new CardTypeItem(ECardCompanyType.MessageBox, "미리보기만"));
       _cardTypeComboBox.SelectedIndex = 0;
     }
 
+    /// <summary>
+    /// 카드사 선택이 바뀔 때 필요한 후속 동작을 위한 진입점입니다.
+    /// </summary>
     private void CardTypeChanged(object? sender, EventArgs e)
     {
       if (_isRefreshing)
@@ -114,6 +131,9 @@ namespace CreditCardStatement_Ver2.Forms
       }
     }
 
+    /// <summary>
+    /// 마지막 저장 설정 또는 기본 프리셋을 읽어 화면에 반영합니다.
+    /// </summary>
     private void ApplyInitialOptions()
     {
       CardImportOptions options = ImportSettingsStore.Load() ?? CardImportOptions.CreatePreset(ECardCompanyType.KB);
@@ -129,6 +149,9 @@ namespace CreditCardStatement_Ver2.Forms
       }
     }
 
+    /// <summary>
+    /// 옵션 객체 값을 각 컨트롤 상태로 펼쳐서 표시합니다.
+    /// </summary>
     private void ApplyPreset(CardImportOptions options)
     {
       _isRefreshing = true;
@@ -152,6 +175,9 @@ namespace CreditCardStatement_Ver2.Forms
       }
     }
 
+    /// <summary>
+    /// 지정한 파서 모드 항목을 콤보박스에서 선택합니다.
+    /// </summary>
     private void SelectParserMode(CardParserMode mode)
     {
       for (int i = 0; i < _parserModeComboBox.Items.Count; i++)
@@ -164,16 +190,25 @@ namespace CreditCardStatement_Ver2.Forms
       }
     }
 
+    /// <summary>
+    /// 구분자 도우미 버튼이 선택한 토큰을 텍스트 상자 끝에 추가합니다.
+    /// </summary>
     private void AppendDelimiterToken(TextBox target, string token)
     {
       target.AppendText(token);
     }
 
+    /// <summary>
+    /// 현재 화면에서 사용할 열 구분 규칙 목록을 반환합니다.
+    /// </summary>
     private List<DelimiterRule> GetColumnRules()
     {
       return new List<DelimiterRule>();
     }
 
+    /// <summary>
+    /// 저장된 옵션에서 표시용 열 구분식 문자열을 재구성합니다.
+    /// </summary>
     private static string GetColumnDelimiterExpression(CardImportOptions options)
     {
       if (!string.IsNullOrWhiteSpace(options.ColumnDelimiterExpression))
@@ -197,6 +232,9 @@ namespace CreditCardStatement_Ver2.Forms
       };
     }
 
+    /// <summary>
+    /// 현재 옵션으로 미리보기 표와 열 매핑 표를 다시 생성합니다.
+    /// </summary>
     private void RefreshPreview()
     {
       if (_isRefreshing)
@@ -204,6 +242,7 @@ namespace CreditCardStatement_Ver2.Forms
         return;
       }
 
+      // 사용자가 체크해 둔 행과 수동 매핑은 미리보기를 다시 만들어도 최대한 유지한다.
       List<int> checkedRows = GetCheckedRows();
       Dictionary<int, string> mappings = GetCurrentMappings();
       _previewRows.Clear();
@@ -247,15 +286,15 @@ namespace CreditCardStatement_Ver2.Forms
 
       _previewGrid.Columns.Clear();
       _previewGrid.Rows.Clear();
-      _previewGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "include", HeaderText = "\uCD94\uAC00", Width = 50 });
-      _previewGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "lineNo", HeaderText = "\uD589", Width = 50, ReadOnly = true });
+      _previewGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "include", HeaderText = "추가", Width = 50 });
+      _previewGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "lineNo", HeaderText = "행", Width = 50, ReadOnly = true });
 
       for (int i = 0; i < maxColumns; i++)
       {
         _previewGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
           Name = $"col{i + 1}",
-          HeaderText = $"\uC5F4{i + 1}",
+          HeaderText = $"열{i + 1}",
           Width = 140,
           ReadOnly = false
         });
@@ -277,6 +316,9 @@ namespace CreditCardStatement_Ver2.Forms
       RefreshPreviewStyles();
     }
 
+    /// <summary>
+    /// 미리보기 열 수에 맞춰 열 매핑 콤보박스를 다시 구성합니다.
+    /// </summary>
     private void BuildColumnMapGrid(int maxColumns, IReadOnlyDictionary<int, string> mappings)
     {
       _columnMapGrid.Columns.Clear();
@@ -284,10 +326,11 @@ namespace CreditCardStatement_Ver2.Forms
 
       for (int i = 0; i < maxColumns; i++)
       {
+        // 원본 열마다 콤보박스 하나를 만들어, 이 열이 금액/일자/가맹점 중 무엇인지 직접 지정하게 한다.
         DataGridViewComboBoxColumn combo = new()
         {
           Name = $"map{i + 1}",
-          HeaderText = $"\uC5F4{i + 1}",
+          HeaderText = $"열{i + 1}",
           Width = i + 2 < _previewGrid.Columns.Count ? _previewGrid.Columns[i + 2].Width : 140,
           DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton,
           FlatStyle = FlatStyle.Standard
@@ -301,7 +344,7 @@ namespace CreditCardStatement_Ver2.Forms
       for (int i = 0; i < maxColumns; i++)
       {
         string sample = _previewRows.FirstOrDefault(r => i < r.Length && !string.IsNullOrWhiteSpace(r[i]))?[i] ?? string.Empty;
-        string mapped = mappings.TryGetValue(i + 1, out string? value) ? value : "\uC0AC\uC6A9 \uC548 \uD568";
+        string mapped = mappings.TryGetValue(i + 1, out string? value) ? value : "사용 안 함";
         DataGridViewCell cell = _columnMapGrid.Rows[rowIndex].Cells[i];
         cell.Value = mapped;
         cell.ToolTipText = sample;
@@ -311,10 +354,13 @@ namespace CreditCardStatement_Ver2.Forms
 
       for (int i = 0; i < maxColumns; i++)
       {
-        _columnMapGrid.Columns[i].HeaderText = $"\uC5F4{i + 1}";
+        _columnMapGrid.Columns[i].HeaderText = $"열{i + 1}";
       }
     }
 
+    /// <summary>
+    /// 미리보기 그리드에서 사용 대상으로 체크된 행 번호를 수집합니다.
+    /// </summary>
     private List<int> GetCheckedRows()
     {
       List<int> rows = new();
@@ -328,6 +374,9 @@ namespace CreditCardStatement_Ver2.Forms
       return rows;
     }
 
+    /// <summary>
+    /// 현재 열 매핑 그리드에서 사용자가 지정한 매핑을 읽어옵니다.
+    /// </summary>
     private Dictionary<int, string> GetCurrentMappings()
     {
       Dictionary<int, string> mappings = new();
@@ -336,11 +385,13 @@ namespace CreditCardStatement_Ver2.Forms
         return mappings;
       }
 
+      // Key: 미리보기 기준 1부터 시작하는 원본 열 번호
+      // Value: TargetFields에서 사용자가 선택한 대상 필드명
       DataGridViewRow row = _columnMapGrid.Rows[0];
       for (int i = 0; i < _columnMapGrid.Columns.Count; i++)
       {
-        string value = row.Cells[i].Value?.ToString() ?? "\uC0AC\uC6A9 \uC548 \uD568";
-        if (value != "\uC0AC\uC6A9 \uC548 \uD568")
+        string value = row.Cells[i].Value?.ToString() ?? "사용 안 함";
+        if (value != "사용 안 함")
         {
           mappings[i + 1] = value;
         }
@@ -348,22 +399,28 @@ namespace CreditCardStatement_Ver2.Forms
       return mappings;
     }
 
+    /// <summary>
+    /// 저장된 옵션의 열 번호 정보를 화면 매핑 형식으로 변환합니다.
+    /// </summary>
     private static Dictionary<int, string> GetMappingsFromOptions(CardImportOptions options)
     {
       Dictionary<int, string> mappings = new();
-      AddMapping(mappings, options.DateColumn, "\uC774\uC6A9\uC77C\uC790");
-      AddMapping(mappings, options.CardColumn, "\uC774\uC6A9\uCE74\uB4DC");
-      AddMapping(mappings, options.DivisionColumn, "\uAD6C\uBD84");
-      AddMapping(mappings, options.MerchantColumn, "\uAC00\uB9F9\uC810");
-      AddMapping(mappings, options.AmountColumn, "\uC774\uC6A9\uAE08\uC561");
-      AddMapping(mappings, options.InstallmentMonthsColumn, "\uD560\uBD80\uAC1C\uC6D4");
-      AddMapping(mappings, options.InstallmentTurnColumn, "\uD68C\uCC28");
-      AddMapping(mappings, options.PrincipalColumn, "\uC6D0\uAE08");
-      AddMapping(mappings, options.FeeColumn, "\uC218\uC218\uB8CC");
-      AddMapping(mappings, options.BalanceColumn, "\uACB0\uC81C \uD6C4 \uC794\uC561");
+      AddMapping(mappings, options.DateColumn, "이용일자");
+      AddMapping(mappings, options.CardColumn, "이용카드");
+      AddMapping(mappings, options.DivisionColumn, "구분");
+      AddMapping(mappings, options.MerchantColumn, "가맹점");
+      AddMapping(mappings, options.AmountColumn, "이용금액");
+      AddMapping(mappings, options.InstallmentMonthsColumn, "할부개월");
+      AddMapping(mappings, options.InstallmentTurnColumn, "회차");
+      AddMapping(mappings, options.PrincipalColumn, "원금");
+      AddMapping(mappings, options.FeeColumn, "수수료");
+      AddMapping(mappings, options.BalanceColumn, "결제 후 잔액");
       return mappings;
     }
 
+    /// <summary>
+    /// 유효한 열 번호만 필드 매핑 딕셔너리에 등록합니다.
+    /// </summary>
     private static void AddMapping(IDictionary<int, string> mappings, int sourceIndex, string fieldName)
     {
       if (sourceIndex > 0 && !mappings.ContainsKey(sourceIndex))
@@ -372,6 +429,9 @@ namespace CreditCardStatement_Ver2.Forms
       }
     }
 
+    /// <summary>
+    /// 선택 여부, 헤더 추정, 건너뛸 행 정보를 바탕으로 미리보기 셀 색상을 갱신합니다.
+    /// </summary>
     private void RefreshPreviewStyles()
     {
       if (_previewGrid.Columns.Count == 0)
@@ -381,10 +441,11 @@ namespace CreditCardStatement_Ver2.Forms
 
       int skipRows = Decimal.ToInt32(_skipRowsNumeric.Value);
       HashSet<int> mappedColumns = GetCurrentMappings()
-        .Where(x => x.Value != "\uC0AC\uC6A9 \uC548 \uD568")
+        .Where(x => x.Value != "사용 안 함")
         .Select(x => x.Key + 1)
         .ToHashSet();
 
+      // 체크 해제/헤더/건너뛸 행을 색상으로 구분해 사용자가 실제 가져올 범위를 쉽게 확인하게 한다.
       foreach (DataGridViewRow row in _previewGrid.Rows)
       {
         bool use = row.Cells["include"].Value is bool b && b;
@@ -408,6 +469,9 @@ namespace CreditCardStatement_Ver2.Forms
       }
     }
 
+    /// <summary>
+    /// 화면에서 편집한 값을 현재 가져오기 옵션 객체로 조립합니다.
+    /// </summary>
     private CardImportOptions BuildOptions()
     {
       CardImportOptions options = new()
@@ -437,16 +501,16 @@ namespace CreditCardStatement_Ver2.Forms
         int sourceIndex = i + 1;
         switch (mappingRow.Cells[i].Value?.ToString())
         {
-          case "\uC774\uC6A9\uC77C\uC790": options.DateColumn = sourceIndex; break;
-          case "\uC774\uC6A9\uCE74\uB4DC": options.CardColumn = sourceIndex; break;
-          case "\uAD6C\uBD84": options.DivisionColumn = sourceIndex; break;
-          case "\uAC00\uB9F9\uC810": options.MerchantColumn = sourceIndex; break;
-          case "\uC774\uC6A9\uAE08\uC561": options.AmountColumn = sourceIndex; break;
-          case "\uD560\uBD80\uAC1C\uC6D4": options.InstallmentMonthsColumn = sourceIndex; break;
-          case "\uD68C\uCC28": options.InstallmentTurnColumn = sourceIndex; break;
-          case "\uC6D0\uAE08": options.PrincipalColumn = sourceIndex; break;
-          case "\uC218\uC218\uB8CC": options.FeeColumn = sourceIndex; break;
-          case "\uACB0\uC81C \uD6C4 \uC794\uC561": options.BalanceColumn = sourceIndex; break;
+          case "이용일자": options.DateColumn = sourceIndex; break;
+          case "이용카드": options.CardColumn = sourceIndex; break;
+          case "구분": options.DivisionColumn = sourceIndex; break;
+          case "가맹점": options.MerchantColumn = sourceIndex; break;
+          case "이용금액": options.AmountColumn = sourceIndex; break;
+          case "할부개월": options.InstallmentMonthsColumn = sourceIndex; break;
+          case "회차": options.InstallmentTurnColumn = sourceIndex; break;
+          case "원금": options.PrincipalColumn = sourceIndex; break;
+          case "수수료": options.FeeColumn = sourceIndex; break;
+          case "결제 후 잔액": options.BalanceColumn = sourceIndex; break;
         }
       }
 
@@ -454,6 +518,9 @@ namespace CreditCardStatement_Ver2.Forms
       return options;
     }
 
+    /// <summary>
+    /// 미리보기 셀 우클릭 시 이동/교환 메뉴를 띄울 셀을 선택합니다.
+    /// </summary>
     private void PreviewGridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
     {
       if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.ColumnIndex < 2)
@@ -467,6 +534,9 @@ namespace CreditCardStatement_Ver2.Forms
       _previewCellMenu.Show(Cursor.Position);
     }
 
+    /// <summary>
+    /// 현재 선택 셀의 값을 좌우로 한 칸 이동합니다.
+    /// </summary>
     private void MoveSelectedCell(int direction)
     {
       DataGridViewCell? cell = _previewGrid.CurrentCell;
@@ -484,6 +554,7 @@ namespace CreditCardStatement_Ver2.Forms
       DataGridViewCell targetCell = _previewGrid[targetColumn, cell.RowIndex];
       bool targetHasValue = !string.IsNullOrWhiteSpace(targetCell.Value?.ToString());
 
+      // 대상 셀에 값이 있으면 서로 바꾸고, 비어 있으면 단순 이동처럼 동작시킨다.
       if (targetHasValue)
       {
         object? currentValue = cell.Value;
@@ -499,6 +570,9 @@ namespace CreditCardStatement_Ver2.Forms
       _previewGrid.CurrentCell = targetCell;
     }
 
+    /// <summary>
+    /// 현재 선택 셀과 좌우 이웃 셀의 값을 맞바꿉니다.
+    /// </summary>
     private void SwapSelectedCell(int direction)
     {
       DataGridViewCell? cell = _previewGrid.CurrentCell;
@@ -520,6 +594,9 @@ namespace CreditCardStatement_Ver2.Forms
       _previewGrid.CurrentCell = otherCell;
     }
 
+    /// <summary>
+    /// 옵션 선택 대화상자의 전체 컨트롤을 생성하고 배치합니다.
+    /// </summary>
     private void InitializeComponent()
     {
       _cardTypeComboBox = new ComboBox();
@@ -542,18 +619,18 @@ namespace CreditCardStatement_Ver2.Forms
       TableLayoutPanel top = new() { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8), ColumnCount = 6 };
       _rowButtonsPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true };
       _columnButtonsPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true };
-      Button ok = new() { Text = "\uD655\uC778", DialogResult = DialogResult.OK };
-      Button cancel = new() { Text = "\uCDE8\uC18C", DialogResult = DialogResult.Cancel };
+      Button ok = new() { Text = "확인", DialogResult = DialogResult.OK };
+      Button cancel = new() { Text = "취소", DialogResult = DialogResult.Cancel };
 
       Button rowTab = new() { Text = "\\t", AutoSize = true };
       Button rowLf = new() { Text = "\\n", AutoSize = true };
       Button rowCrLf = new() { Text = "\\r\\n", AutoSize = true };
       Button rowCr = new() { Text = "\\r", AutoSize = true };
-      Button rowBlank = new() { Text = "\uBE48\uC904", AutoSize = true };
-      Button rowSpace = new() { Text = "\uACF5\uBC31", AutoSize = true };
-      Button rowSpace2 = new() { Text = "\uACF5\uBC312", AutoSize = true };
-      Button rowSpace3 = new() { Text = "\uACF5\uBC313", AutoSize = true };
-      Button rowClear = new() { Text = "\uBE44\uC6B0\uAE30", AutoSize = true };
+      Button rowBlank = new() { Text = "빈줄", AutoSize = true };
+      Button rowSpace = new() { Text = "공백", AutoSize = true };
+      Button rowSpace2 = new() { Text = "공백2", AutoSize = true };
+      Button rowSpace3 = new() { Text = "공백3", AutoSize = true };
+      Button rowClear = new() { Text = "비우기", AutoSize = true };
       Button colTab = new() { Text = "\\t", AutoSize = true };
       Button colLf = new() { Text = "\\n", AutoSize = true };
       Button colCrLf = new() { Text = "\\r\\n", AutoSize = true };
@@ -561,10 +638,10 @@ namespace CreditCardStatement_Ver2.Forms
       Button colComma = new() { Text = ",", AutoSize = true };
       Button colSemicolon = new() { Text = ";", AutoSize = true };
       Button colPipe = new() { Text = "|", AutoSize = true };
-      Button colSpace = new() { Text = "\uACF5\uBC31", AutoSize = true };
-      Button colSpace2 = new() { Text = "\uACF5\uBC312", AutoSize = true };
-      Button colSpace3 = new() { Text = "\uACF5\uBC313", AutoSize = true };
-      Button colClear = new() { Text = "\uBE44\uC6B0\uAE30", AutoSize = true };
+      Button colSpace = new() { Text = "공백", AutoSize = true };
+      Button colSpace2 = new() { Text = "공백2", AutoSize = true };
+      Button colSpace3 = new() { Text = "공백3", AutoSize = true };
+      Button colClear = new() { Text = "비우기", AutoSize = true };
 
       rowTab.Click += (_, _) => AppendDelimiterToken(_rowDelimiterTextBox, @"\t");
       rowLf.Click += (_, _) => AppendDelimiterToken(_rowDelimiterTextBox, @"\n");
@@ -614,13 +691,13 @@ namespace CreditCardStatement_Ver2.Forms
       _statementMonthPicker.CustomFormat = "yyyy-MM";
       _statementMonthPicker.ShowUpDown = true;
       _statementMonthPicker.Width = 90;
-      _trimRowsCheckBox.Text = "\uD589 Trim";
+      _trimRowsCheckBox.Text = "행 Trim";
       _trimRowsCheckBox.AutoSize = true;
-      _trimCellsCheckBox.Text = "\uC140 Trim";
+      _trimCellsCheckBox.Text = "셀 Trim";
       _trimCellsCheckBox.AutoSize = true;
       _parserHintLabel.AutoSize = true;
       _parserHintLabel.ForeColor = Color.DarkBlue;
-      _applyPreviewButton.Text = "\uC801\uC6A9";
+      _applyPreviewButton.Text = "적용";
       _applyPreviewButton.AutoSize = true;
       _rawTextBox.Multiline = true;
       _rawTextBox.ReadOnly = true;
@@ -637,10 +714,10 @@ namespace CreditCardStatement_Ver2.Forms
       _previewGrid.Dock = DockStyle.Fill;
       _previewGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells;
       _previewGrid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
-      _previewCellMenu.Items.Add("\uC67C\uCABD\uC73C\uB85C \uC774\uB3D9", null, (_, _) => MoveSelectedCell(-1));
-      _previewCellMenu.Items.Add("\uC624\uB978\uCABD\uC73C\uB85C \uC774\uB3D9", null, (_, _) => MoveSelectedCell(1));
-      _previewCellMenu.Items.Add("\uC67C\uCABD\uACFC \uBC14\uAFB8\uAE30", null, (_, _) => SwapSelectedCell(-1));
-      _previewCellMenu.Items.Add("\uC624\uB978\uCABD\uACFC \uBC14\uAFB8\uAE30", null, (_, _) => SwapSelectedCell(1));
+      _previewCellMenu.Items.Add("왼쪽으로 이동", null, (_, _) => MoveSelectedCell(-1));
+      _previewCellMenu.Items.Add("오른쪽으로 이동", null, (_, _) => MoveSelectedCell(1));
+      _previewCellMenu.Items.Add("왼쪽과 바꾸기", null, (_, _) => SwapSelectedCell(-1));
+      _previewCellMenu.Items.Add("오른쪽과 바꾸기", null, (_, _) => SwapSelectedCell(1));
       _columnMapGrid.AllowUserToAddRows = false;
       _columnMapGrid.AllowUserToDeleteRows = false;
       _columnMapGrid.RowHeadersVisible = false;
@@ -651,20 +728,20 @@ namespace CreditCardStatement_Ver2.Forms
       _columnMapGrid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.EnableResizing;
       _columnMapGrid.ColumnHeadersHeight = 28;
 
-      top.Controls.Add(new Label { Text = "\uCE74\uB4DC", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+      top.Controls.Add(new Label { Text = "카드", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
       top.Controls.Add(_cardTypeComboBox, 1, 0);
-      top.Controls.Add(new Label { Text = "\uD30C\uC11C", AutoSize = true, Anchor = AnchorStyles.Left }, 2, 0);
+      top.Controls.Add(new Label { Text = "파서", AutoSize = true, Anchor = AnchorStyles.Left }, 2, 0);
       top.Controls.Add(_parserModeComboBox, 3, 0);
-      top.Controls.Add(new Label { Text = "\uBA85\uC138\uC6D4", AutoSize = true, Anchor = AnchorStyles.Left }, 4, 0);
+      top.Controls.Add(new Label { Text = "명세월", AutoSize = true, Anchor = AnchorStyles.Left }, 4, 0);
       top.Controls.Add(_statementMonthPicker, 5, 0);
-      top.Controls.Add(new Label { Text = "\uAC74\uB108\uB6F8 \uD589", AutoSize = true, Anchor = AnchorStyles.Left }, 4, 1);
+      top.Controls.Add(new Label { Text = "건너뛸 행", AutoSize = true, Anchor = AnchorStyles.Left }, 4, 1);
       top.Controls.Add(_skipRowsNumeric, 5, 1);
       top.Controls.Add(_parserHintLabel, 0, 6);
       top.SetColumnSpan(_parserHintLabel, 6);
-      _rowDelimiterLabel.Text = "\uD589 1\uCC28 \uBCC0\uD658";
+      _rowDelimiterLabel.Text = "행 1차 변환";
       _rowDelimiterLabel.AutoSize = true;
       _rowDelimiterLabel.Anchor = AnchorStyles.Left;
-      _columnDelimiterLabel.Text = "\uC5F4 2\uCC28 \uBCC0\uD658";
+      _columnDelimiterLabel.Text = "열 2차 변환";
       _columnDelimiterLabel.AutoSize = true;
       _columnDelimiterLabel.Anchor = AnchorStyles.Left;
 
@@ -695,10 +772,13 @@ namespace CreditCardStatement_Ver2.Forms
       MinimumSize = new Size(1000, 700);
       Name = "CopyTypeSelectForm";
       StartPosition = FormStartPosition.CenterParent;
-      Text = "\uD074\uB9BD\uBCF4\uB4DC \uBD88\uB7EC\uC624\uAE30 \uC635\uC158";
+      Text = "클립보드 불러오기 옵션";
       UpdateParserUi();
     }
 
+    /// <summary>
+    /// 선택된 파서 모드에 맞춰 행 구분 UI와 안내 문구를 갱신합니다.
+    /// </summary>
     private void UpdateParserUi()
     {
       CardParserMode mode = _parserModeComboBox.SelectedItem is ParserModeItem item
@@ -707,9 +787,9 @@ namespace CreditCardStatement_Ver2.Forms
 
       bool excelLike = mode == CardParserMode.ExcelLike;
       _rowDelimiterLabel.Text = excelLike
-        ? "\uD589 1\uCC28 \uBCC0\uD658 (\uACE0\uC815: \uC2E4\uC81C \uC904\uBC14\uAFC8)"
-        : "\uD589 1\uCC28 \uBCC0\uD658";
-      _columnDelimiterLabel.Text = "\uC5F4 2\uCC28 \uBCC0\uD658";
+        ? "행 1차 변환 (고정: 실제 줄바꿈)"
+        : "행 1차 변환";
+      _columnDelimiterLabel.Text = "열 2차 변환";
 
       _rowDelimiterTextBox.ReadOnly = excelLike;
       _rowDelimiterTextBox.Visible = !excelLike;
@@ -718,22 +798,25 @@ namespace CreditCardStatement_Ver2.Forms
 
       if (excelLike)
       {
-        _parserHintLabel.Text = "\uC5D1\uC140\uC2DD: \uD589\uC740 \uC6D0\uBCF8 \uC904\uBC14\uAFC8\uC744 \uADF8\uB300\uB85C \uC0AC\uC6A9\uD558\uACE0, \uC5F4\uB9CC 2\uCC28 \uBCC0\uD658\uD569\uB2C8\uB2E4.";
+        _parserHintLabel.Text = "엑셀식: 행은 원본 줄바꿈을 그대로 사용하고, 열만 2차 변환합니다.";
       }
       else if (mode == CardParserMode.MultiLineRecord)
       {
-        _parserHintLabel.Text = "\uAC70\uB798 \uBB36\uC74C\uD615: \uD589 1\uCC28 \uBCC0\uD658 \uD6C4 \uC5EC\uB7EC \uC904\uC744 \uD558\uB098\uC758 \uAC70\uB798\uB85C \uBB36\uC2B5\uB2C8\uB2E4.";
+        _parserHintLabel.Text = "거래 묶음형: 행 1차 변환 후 여러 줄을 하나의 거래로 묶습니다.";
       }
       else if (mode == CardParserMode.Tabular)
       {
-        _parserHintLabel.Text = "\uD45C \uD615\uC2DD: \uD589 1\uCC28 \uBCC0\uD658 \uD6C4 \uAC01 \uD589\uC744 \uB3C5\uB9BD \uB370\uC774\uD130\uB85C \uCC98\uB9AC\uD569\uB2C8\uB2E4.";
+        _parserHintLabel.Text = "표 형식: 행 1차 변환 후 각 행을 독립 데이터로 처리합니다.";
       }
       else
       {
-        _parserHintLabel.Text = "\uC790\uB3D9: \uCE74\uB4DC \uC885\uB958\uC640 \uBBF8\uB9AC\uBCF4\uAE30 \uACB0\uACFC\uB97C \uAE30\uBC18\uC73C\uB85C \uC801\uD569\uD55C \uBC29\uC2DD\uC744 \uC120\uD0DD\uD569\uB2C8\uB2E4.";
+        _parserHintLabel.Text = "자동: 카드 종류와 미리보기 결과를 기반으로 적합한 방식을 선택합니다.";
       }
     }
 
+    /// <summary>
+    /// 저장된 명세월 문자열을 월 선택기에서 사용할 날짜 값으로 변환합니다.
+    /// </summary>
     private static DateTime ParseStatementMonth(string? value)
     {
       if (!string.IsNullOrWhiteSpace(value)
@@ -746,6 +829,9 @@ namespace CreditCardStatement_Ver2.Forms
       return new DateTime(now.Year, now.Month, 1);
     }
 
+    /// <summary>
+    /// 사용자가 미리보기 그리드에서 수정한 셀 값을 다시 행 배열로 추출합니다.
+    /// </summary>
     private List<string[]> GetEditedPreviewRows()
     {
       List<string[]> rows = new();
@@ -765,11 +851,17 @@ namespace CreditCardStatement_Ver2.Forms
 
     private sealed record CardTypeItem(ECardCompanyType Type, string Name)
     {
+      /// <summary>
+      /// 콤보박스 표시용 카드사 이름을 반환합니다.
+      /// </summary>
       public override string ToString() => Name;
     }
 
     private sealed record ParserModeItem(CardParserMode Mode, string Name)
     {
+      /// <summary>
+      /// 콤보박스 표시용 파서 모드 이름을 반환합니다.
+      /// </summary>
       public override string ToString() => Name;
     }
   }

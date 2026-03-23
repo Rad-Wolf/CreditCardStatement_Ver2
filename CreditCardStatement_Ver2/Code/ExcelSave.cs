@@ -11,7 +11,10 @@ namespace CreditCardStatement_Ver2.Code
       WriteIndented = true
     };
 
-    public static void SaveFile(string filePath, IEnumerable<CardTransaction> transactions)
+    /// <summary>
+    /// 거래 목록과 마지막 가져오기 설정을 카드 압축 파일로 저장합니다.
+    /// </summary>
+    public static void SaveFile(string filePath, IEnumerable<CardTransaction> transactions, CardImportOptions? importOptions = null)
     {
       List<CardTransaction> items = transactions
         .OrderBy(x => x.CardCompany)
@@ -19,6 +22,7 @@ namespace CreditCardStatement_Ver2.Code
         .ThenBy(x => x.Merchant)
         .ToList();
 
+      // 같은 이름 파일을 덮어쓸 때 손상 위험을 줄이기 위해 임시 zip을 만든 뒤 최종 파일로 이동한다.
       string tempZipPath = Path.Combine(
         Path.GetDirectoryName(filePath) ?? string.Empty,
         $"{Path.GetFileNameWithoutExtension(filePath)}_{Guid.NewGuid():N}.zip");
@@ -28,7 +32,7 @@ namespace CreditCardStatement_Ver2.Code
         using (FileStream stream = File.Create(tempZipPath))
         using (ZipArchive archive = new(stream, ZipArchiveMode.Create))
         {
-          CardArchiveMain main = BuildMain(items);
+          CardArchiveMain main = BuildMain(items, importOptions);
           foreach (CardArchiveCard card in main.Cards)
           {
             CardArchiveCardFile cardFile = BuildCardFile(card.CardCompany, items.Where(x => x.CardCompany == card.CardCompany));
@@ -54,6 +58,9 @@ namespace CreditCardStatement_Ver2.Code
       }
     }
 
+    /// <summary>
+    /// 카드 압축 파일을 읽어 거래 목록으로 복원합니다.
+    /// </summary>
     public static IList<CardTransaction> LoadFile(string filePath)
     {
       using ZipArchive archive = ZipFile.OpenRead(filePath);
@@ -67,6 +74,11 @@ namespace CreditCardStatement_Ver2.Code
       if (main is null)
       {
         throw new InvalidDataException("main.json을 읽을 수 없습니다.");
+      }
+
+      if (main.ImportSettings is not null)
+      {
+        ImportSettingsStore.Save(ToCardImportOptions(main.ImportSettings));
       }
 
       List<CardTransaction> transactions = new();
@@ -97,7 +109,10 @@ namespace CreditCardStatement_Ver2.Code
         .ToList();
     }
 
-    private static CardArchiveMain BuildMain(IReadOnlyList<CardTransaction> items)
+    /// <summary>
+    /// 저장 파일의 최상위 인덱스 정보를 구성합니다.
+    /// </summary>
+    private static CardArchiveMain BuildMain(IReadOnlyList<CardTransaction> items, CardImportOptions? importOptions)
     {
       return new CardArchiveMain
       {
@@ -105,6 +120,7 @@ namespace CreditCardStatement_Ver2.Code
         Version = 2,
         SavedAt = DateTime.Now,
         TransactionCount = items.Count,
+        ImportSettings = importOptions is null ? null : FromCardImportOptions(importOptions),
         Cards = items
           .GroupBy(x => string.IsNullOrWhiteSpace(x.CardCompany) ? "미지정" : x.CardCompany)
           .OrderBy(x => x.Key)
@@ -126,6 +142,9 @@ namespace CreditCardStatement_Ver2.Code
       };
     }
 
+    /// <summary>
+    /// 카드사별 거래 묶음을 월 단위 파일 구조로 변환합니다.
+    /// </summary>
     private static CardArchiveCardFile BuildCardFile(string cardCompany, IEnumerable<CardTransaction> transactions)
     {
       List<CardTransaction> items = transactions
@@ -151,6 +170,9 @@ namespace CreditCardStatement_Ver2.Code
       };
     }
 
+    /// <summary>
+    /// 객체를 JSON으로 직렬화해 zip 엔트리에 기록합니다.
+    /// </summary>
     private static void WriteJsonEntry<T>(ZipArchive archive, string entryName, T value)
     {
       ZipArchiveEntry entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
@@ -159,12 +181,18 @@ namespace CreditCardStatement_Ver2.Code
       writer.Write(JsonSerializer.Serialize(value, JsonOptions));
     }
 
+    /// <summary>
+    /// zip 엔트리의 JSON을 지정 타입 객체로 역직렬화합니다.
+    /// </summary>
     private static T? ReadJsonEntry<T>(ZipArchiveEntry entry)
     {
       using Stream stream = entry.Open();
       return JsonSerializer.Deserialize<T>(stream, JsonOptions);
     }
 
+    /// <summary>
+    /// 카드사명을 파일명으로 안전하게 사용할 수 있도록 정리합니다.
+    /// </summary>
     private static string SanitizeFileName(string? value)
     {
       if (string.IsNullOrWhiteSpace(value))
@@ -184,13 +212,92 @@ namespace CreditCardStatement_Ver2.Code
       return sanitized.Length == 0 ? "unknown" : sanitized;
     }
 
+    /// <summary>
+    /// 런타임 옵션 객체를 저장용 단순 DTO로 변환합니다.
+    /// </summary>
+    private static SavedImportSettings FromCardImportOptions(CardImportOptions options)
+    {
+      return new SavedImportSettings
+      {
+        CardType = options.CardType,
+        ParserMode = options.ParserMode,
+        RowDelimiterExpression = options.RowDelimiterExpression,
+        ColumnDelimiterExpression = options.ColumnDelimiterExpression,
+        TrimRows = options.TrimRows,
+        TrimCells = options.TrimCells,
+        SkipRows = options.SkipRows,
+        StatementYearMonth = options.StatementYearMonth,
+        DateColumn = options.DateColumn,
+        CardColumn = options.CardColumn,
+        DivisionColumn = options.DivisionColumn,
+        MerchantColumn = options.MerchantColumn,
+        AmountColumn = options.AmountColumn,
+        InstallmentMonthsColumn = options.InstallmentMonthsColumn,
+        InstallmentTurnColumn = options.InstallmentTurnColumn,
+        PrincipalColumn = options.PrincipalColumn,
+        FeeColumn = options.FeeColumn,
+        BalanceColumn = options.BalanceColumn
+      };
+    }
+
+    /// <summary>
+    /// 저장된 DTO를 다시 런타임 옵션 객체로 복원합니다.
+    /// </summary>
+    private static CardImportOptions ToCardImportOptions(SavedImportSettings settings)
+    {
+      return new CardImportOptions
+      {
+        CardType = settings.CardType,
+        ParserMode = settings.ParserMode,
+        RowDelimiterExpression = settings.RowDelimiterExpression,
+        ColumnDelimiterExpression = settings.ColumnDelimiterExpression,
+        TrimRows = settings.TrimRows,
+        TrimCells = settings.TrimCells,
+        SkipRows = settings.SkipRows,
+        StatementYearMonth = settings.StatementYearMonth,
+        DateColumn = settings.DateColumn,
+        CardColumn = settings.CardColumn,
+        DivisionColumn = settings.DivisionColumn,
+        MerchantColumn = settings.MerchantColumn,
+        AmountColumn = settings.AmountColumn,
+        InstallmentMonthsColumn = settings.InstallmentMonthsColumn,
+        InstallmentTurnColumn = settings.InstallmentTurnColumn,
+        PrincipalColumn = settings.PrincipalColumn,
+        FeeColumn = settings.FeeColumn,
+        BalanceColumn = settings.BalanceColumn
+      };
+    }
+
     private sealed class CardArchiveMain
     {
       public string Format { get; set; } = string.Empty;
       public int Version { get; set; }
       public DateTime SavedAt { get; set; }
       public int TransactionCount { get; set; }
+      public SavedImportSettings? ImportSettings { get; set; }
       public List<CardArchiveCard> Cards { get; set; } = new();
+    }
+
+    private sealed class SavedImportSettings
+    {
+      public ECardCompanyType CardType { get; set; }
+      public CardParserMode ParserMode { get; set; }
+      public string RowDelimiterExpression { get; set; } = string.Empty;
+      public string ColumnDelimiterExpression { get; set; } = string.Empty;
+      public bool TrimRows { get; set; }
+      public bool TrimCells { get; set; }
+      public int SkipRows { get; set; }
+      public string StatementYearMonth { get; set; } = string.Empty;
+      public int DateColumn { get; set; }
+      public int CardColumn { get; set; }
+      public int DivisionColumn { get; set; }
+      public int MerchantColumn { get; set; }
+      public int AmountColumn { get; set; }
+      public int InstallmentMonthsColumn { get; set; }
+      public int InstallmentTurnColumn { get; set; }
+      public int PrincipalColumn { get; set; }
+      public int FeeColumn { get; set; }
+      public int BalanceColumn { get; set; }
     }
 
     private sealed class CardArchiveCard

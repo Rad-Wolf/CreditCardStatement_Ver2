@@ -15,6 +15,9 @@ namespace CreditCardStatement_Ver2.Code
         "CreditCardStatement_Ver2",
         "last-import-settings.json");
 
+    /// <summary>
+    /// 마지막으로 사용한 가져오기 설정을 로컬 앱 데이터 폴더에서 읽어옵니다.
+    /// </summary>
     public static CardImportOptions? Load()
     {
       try
@@ -33,6 +36,9 @@ namespace CreditCardStatement_Ver2.Code
       }
     }
 
+    /// <summary>
+    /// 현재 가져오기 설정을 다음 실행에서도 재사용할 수 있도록 저장합니다.
+    /// </summary>
     public static void Save(CardImportOptions options)
     {
       try

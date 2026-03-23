@@ -6,6 +6,7 @@ namespace CreditCardStatement_Ver2.Forms
   {
     private readonly CardImportService _importService = new();
     private readonly List<CardTransaction> _allTransactions = new();
+    private CardImportOptions? _lastImportOptions;
 
     private readonly string[] _detailedHeaders =
     {
@@ -28,12 +29,18 @@ namespace CreditCardStatement_Ver2.Forms
     private ListView _detailListView = null!;
     private ListView _summaryListView = null!;
 
+    /// <summary>
+    /// 메인 화면을 초기화하고 목록 컬럼 구성을 준비합니다.
+    /// </summary>
     public MainForm()
     {
       InitializeComponent();
       InitializeListViews();
     }
 
+    /// <summary>
+    /// 폼이 소유한 구성 요소를 정리합니다.
+    /// </summary>
     protected override void Dispose(bool disposing)
     {
       if (disposing)
@@ -44,6 +51,9 @@ namespace CreditCardStatement_Ver2.Forms
       base.Dispose(disposing);
     }
 
+    /// <summary>
+    /// Ctrl+V 단축키를 감지해 클립보드 가져오기를 실행합니다.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
       base.OnKeyDown(e);
@@ -54,17 +64,26 @@ namespace CreditCardStatement_Ver2.Forms
       }
     }
 
+    /// <summary>
+    /// 상세/요약 리스트뷰 컬럼 헤더를 초기화합니다.
+    /// </summary>
     private void InitializeListViews()
     {
       _detailListView.Columns.AddRange(_detailedHeaders.Select(CreateColumnHeader).ToArray());
       _summaryListView.Columns.AddRange(_summaryHeaders.Select(CreateColumnHeader).ToArray());
     }
 
+    /// <summary>
+    /// 지정한 텍스트로 리스트뷰 컬럼 헤더를 생성합니다.
+    /// </summary>
     private static ColumnHeader CreateColumnHeader(string text)
     {
       return new ColumnHeader { Text = text };
     }
 
+    /// <summary>
+    /// 클립보드 텍스트를 옵션 대화상자와 파서를 거쳐 거래 목록에 추가합니다.
+    /// </summary>
     private void ImportClipboard()
     {
       string clipboardText = Clipboard.GetText(TextDataFormat.UnicodeText);
@@ -81,6 +100,7 @@ namespace CreditCardStatement_Ver2.Forms
       }
 
       CardImportOptions options = dialog.ImportOptions;
+      _lastImportOptions = options;
       if (options.CardType == ECardCompanyType.MessageBox)
       {
         MessageBox.Show(this, clipboardText, "클립보드 미리보기");
@@ -98,6 +118,9 @@ namespace CreditCardStatement_Ver2.Forms
       RefreshListViews();
     }
 
+    /// <summary>
+    /// 저장된 카드 압축 파일을 불러와 현재 목록에 병합하거나 교체합니다.
+    /// </summary>
     private void LoadClick(object? sender, EventArgs e)
     {
       using OpenFileDialog dialog = new()
@@ -146,6 +169,9 @@ namespace CreditCardStatement_Ver2.Forms
       MessageBox.Show(this, "불러오기를 완료했습니다.");
     }
 
+    /// <summary>
+    /// 전체 거래 목록과 카드사별 요약 목록을 다시 그립니다.
+    /// </summary>
     private void RefreshListViews()
     {
       _detailListView.BeginUpdate();
@@ -173,6 +199,7 @@ namespace CreditCardStatement_Ver2.Forms
         .GroupBy(x => string.IsNullOrWhiteSpace(x.CardCompany) ? "미지정" : x.CardCompany)
         .OrderBy(x => x.Key))
       {
+        // 아직 끝나지 않은 할부 건의 원금과 수수료를 합산해 다음 달 이월 예상 금액을 계산한다.
         decimal nextMonthCarry = group
           .Where(x => x.InstallmentMonths > 1 && x.InstallmentTurn < x.InstallmentMonths)
           .Sum(x => x.Principal + x.Fee);
@@ -193,6 +220,9 @@ namespace CreditCardStatement_Ver2.Forms
       _summaryListView.EndUpdate();
     }
 
+    /// <summary>
+    /// 현재 거래 목록을 카드 압축 파일로 저장합니다.
+    /// </summary>
     private void SaveClick(object? sender, EventArgs e)
     {
       if (_allTransactions.Count == 0)
@@ -215,7 +245,7 @@ namespace CreditCardStatement_Ver2.Forms
 
       try
       {
-        ExcelSave.SaveFile(dialog.FileName, _allTransactions);
+        ExcelSave.SaveFile(dialog.FileName, _allTransactions, _lastImportOptions);
         MessageBox.Show(this, "저장을 완료했습니다.");
       }
       catch (Exception ex)
@@ -224,6 +254,9 @@ namespace CreditCardStatement_Ver2.Forms
       }
     }
 
+    /// <summary>
+    /// 현재 화면의 거래 목록을 모두 비울지 확인한 뒤 초기화합니다.
+    /// </summary>
     private void ClearClick(object? sender, EventArgs e)
     {
       DialogResult result = MessageBox.Show(this, "목록을 모두 지울까요?", "확인", MessageBoxButtons.YesNo);
@@ -236,16 +269,25 @@ namespace CreditCardStatement_Ver2.Forms
       RefreshListViews();
     }
 
+    /// <summary>
+    /// 드래그 앤 드롭은 지원하지 않음을 명시해 금지 커서를 표시합니다.
+    /// </summary>
     private void DragEnterEvent(object? sender, DragEventArgs e)
     {
       e.Effect = DragDropEffects.None;
     }
 
+    /// <summary>
+    /// 드롭 시에는 클립보드 붙여넣기 사용 방법만 안내합니다.
+    /// </summary>
     private void DragDropEvent(object? sender, DragEventArgs e)
     {
       MessageBox.Show(this, "현재는 클립보드 붙여넣기만 지원합니다. 카드 명세서를 복사한 뒤 Ctrl+V를 눌러 주세요.");
     }
 
+    /// <summary>
+    /// 메인 화면의 메뉴, 안내 문구, 상세/요약 리스트를 생성하고 배치합니다.
+    /// </summary>
     private void InitializeComponent()
     {
       _menuStrip = new MenuStrip();
