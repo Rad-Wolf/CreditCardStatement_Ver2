@@ -5,6 +5,22 @@ namespace CreditCardStatement_Ver2.Code
 {
   internal sealed class CardImportService
   {
+    private static readonly Regex NongHyupBenefitRegex = new(
+      @"^[+-]?\d{1,3}(?:,\d{3})*\([^)]*\)$",
+      RegexOptions.Compiled);
+
+    private static readonly Regex NongHyupDivisionRegex = new(
+      @"^\d+\s*/\s*\d+$",
+      RegexOptions.Compiled);
+
+    private static readonly Regex ShinhanCardSuffixRegex = new(
+      @"^\d{3,4}$",
+      RegexOptions.Compiled);
+
+    private static readonly Regex KbLoanStartRegex = new(
+      @"^\d[\d*]+$",
+      RegexOptions.Compiled);
+
     /// <summary>
     /// 다중 행 거래에서 첫 줄 시작을 판별할 때 사용하는 날짜 시작 정규식입니다.
     /// </summary>
@@ -47,6 +63,11 @@ namespace CreditCardStatement_Ver2.Code
         return ImportFromPreviewRows(options, mode, options.ManualPreviewRows);
       }
 
+      if (ShouldUsePhysicalPreviewParser(options.CardType, mode))
+      {
+        return ImportFromPreviewRows(options, mode, BuildPreviewRows(options, rawText));
+      }
+
       return mode switch
       {
         CardParserMode.MultiLineRecord => ImportMultiLineRecord(
@@ -59,6 +80,51 @@ namespace CreditCardStatement_Ver2.Code
         CardParserMode.ExcelLike => ImportExcelLike(options, rawText),
         _ => ImportTabular(options, rawText)
       };
+    }
+
+    public static List<string[]> BuildPreviewRows(CardImportOptions options, string rawText)
+    {
+      CardParserMode mode = options.ParserMode == CardParserMode.Auto
+        ? InferParserMode(options.CardType)
+        : options.ParserMode;
+
+      if (ShouldUseNongHyupPhysicalParser(options.CardType, mode))
+      {
+        return BuildNongHyupPreviewRows(rawText, options.TrimRows, options.TrimCells);
+      }
+
+      if (ShouldUseShinhanPhysicalParser(options.CardType, mode))
+      {
+        return BuildShinhanPreviewRows(rawText, options.TrimRows, options.TrimCells);
+      }
+
+      if (mode == CardParserMode.MultiLineRecord)
+      {
+        return BuildMultiLineRecordPreviewRows(
+          rawText,
+          options.RowDelimiterExpression,
+          options.RowDelimiterRules,
+          options.ColumnDelimiterExpression,
+          options.ColumnDelimiterRules,
+          options.TrimRows,
+          options.TrimCells);
+      }
+
+      return mode == CardParserMode.ExcelLike
+        ? BuildExcelLikePreviewRows(
+          rawText,
+          options.ColumnDelimiterExpression,
+          options.ColumnDelimiterRules,
+          options.TrimRows,
+          options.TrimCells)
+        : BuildPreviewRows(
+          rawText,
+          options.RowDelimiterExpression,
+          options.ColumnDelimiterExpression,
+          options.ColumnDelimiterRules,
+          options.SkipRows,
+          options.TrimRows,
+          options.TrimCells);
     }
 
     /// <summary>
@@ -407,12 +473,408 @@ namespace CreditCardStatement_Ver2.Code
       return value >= 0xAC00 && value <= 0xD7A3;
     }
 
+    private static bool ShouldUseNongHyupPhysicalParser(ECardCompanyType cardType, CardParserMode mode)
+    {
+      return cardType == ECardCompanyType.NongHyup && mode != CardParserMode.MultiLineRecord;
+    }
+
+    private static bool ShouldUseShinhanPhysicalParser(ECardCompanyType cardType, CardParserMode mode)
+    {
+      return cardType == ECardCompanyType.Shinhan && mode != CardParserMode.MultiLineRecord;
+    }
+
+    private static bool ShouldUsePhysicalPreviewParser(ECardCompanyType cardType, CardParserMode mode)
+    {
+      return ShouldUseNongHyupPhysicalParser(cardType, mode) || ShouldUseShinhanPhysicalParser(cardType, mode);
+    }
+
     /// <summary>
     /// 카드사별 기본 파서 모드를 결정합니다.
     /// </summary>
     private static CardParserMode InferParserMode(ECardCompanyType type)
     {
       return type == ECardCompanyType.KB ? CardParserMode.MultiLineRecord : CardParserMode.Tabular;
+    }
+
+    private static List<string[]> BuildNongHyupPreviewRows(string rawText, bool trimRows, bool trimCells)
+    {
+      List<string[]> rows = new();
+
+      foreach (string rawLine in SplitPhysicalLines(rawText))
+      {
+        if (TryBuildNongHyupPreviewRow(rawLine, trimRows, trimCells, out string[]? row) && row is not null)
+        {
+          rows.Add(row);
+        }
+      }
+
+      return rows;
+    }
+
+    private static bool TryBuildNongHyupPreviewRow(string rawLine, bool trimRows, bool trimCells, out string[]? row)
+    {
+      row = null;
+
+      string line = PrepareRow(rawLine, trimRows);
+      if (string.IsNullOrWhiteSpace(line) || IsHeaderLine(line))
+      {
+        return false;
+      }
+
+      Match dateMatch = RecordStartRegex.Match(line);
+      if (!dateMatch.Success)
+      {
+        return false;
+      }
+
+      string dateText = dateMatch.Groups["date"].Value;
+      string remainder = line[dateMatch.Length..].Trim();
+      if (string.IsNullOrWhiteSpace(remainder))
+      {
+        return false;
+      }
+
+      List<string> tokens = Regex.Split(remainder, @"\s+")
+        .Where(x => !string.IsNullOrWhiteSpace(x))
+        .ToList();
+
+      int amountIndex = tokens.FindIndex(IsNongHyupMoneyToken);
+      if (amountIndex <= 0)
+      {
+        return false;
+      }
+
+      string merchant = string.Join(" ", tokens.Take(amountIndex)).Trim();
+      if (string.IsNullOrWhiteSpace(merchant))
+      {
+        return false;
+      }
+
+      string amount = tokens[amountIndex];
+      int cursor = amountIndex + 1;
+      string benefit = string.Empty;
+      string division = string.Empty;
+
+      if (cursor < tokens.Count && IsNongHyupBenefitToken(tokens[cursor]))
+      {
+        benefit = tokens[cursor++];
+      }
+
+      if (cursor < tokens.Count && LooksLikeNongHyupDivision(tokens[cursor]))
+      {
+        division = tokens[cursor++];
+      }
+
+      List<string> tail = tokens.Skip(cursor).ToList();
+      string principal = tail.ElementAtOrDefault(0) ?? string.Empty;
+      string fee = tail.ElementAtOrDefault(1) ?? string.Empty;
+      string balance = tail.ElementAtOrDefault(2) ?? string.Empty;
+
+      row =
+      [
+        PrepareCell(dateText, trimCells),
+        PrepareCell(merchant, trimCells),
+        PrepareCell(amount, trimCells),
+        PrepareCell(benefit, trimCells),
+        PrepareCell(division, trimCells),
+        PrepareCell(principal, trimCells),
+        PrepareCell(fee, trimCells),
+        PrepareCell(balance, trimCells)
+      ];
+
+      return true;
+    }
+
+    private static bool IsNongHyupMoneyToken(string token)
+    {
+      return !token.Contains('/') && !IsNongHyupBenefitToken(token) && TryParseMoney(token, out _);
+    }
+
+    private static bool IsNongHyupBenefitToken(string token)
+    {
+      return NongHyupBenefitRegex.IsMatch(token.Trim());
+    }
+
+    private static bool LooksLikeNongHyupDivision(string token)
+    {
+      return NongHyupDivisionRegex.IsMatch(token.Trim());
+    }
+
+    private static List<string[]> BuildShinhanPreviewRows(string rawText, bool trimRows, bool trimCells)
+    {
+      List<string[]> rows = new();
+      List<string>? current = null;
+
+      foreach (string rawLine in SplitPhysicalLines(rawText))
+      {
+        string line = PrepareRow(rawLine, trimRows);
+        if (string.IsNullOrWhiteSpace(line))
+        {
+          continue;
+        }
+
+        if (IsShinhanSummaryLine(line))
+        {
+          if (current is { Count: > 0 } && TryBuildShinhanPreviewRow(current, trimCells, out string[]? summaryRow) && summaryRow is not null)
+          {
+            rows.Add(summaryRow);
+          }
+
+          current = null;
+          continue;
+        }
+
+        if (RecordStartRegex.IsMatch(line))
+        {
+          if (current is { Count: > 0 } && TryBuildShinhanPreviewRow(current, trimCells, out string[]? row) && row is not null)
+          {
+            rows.Add(row);
+          }
+
+          current = new List<string> { line };
+          continue;
+        }
+
+        current ??= new List<string>();
+        current.Add(line);
+      }
+
+      if (current is { Count: > 0 } && TryBuildShinhanPreviewRow(current, trimCells, out string[]? lastRow) && lastRow is not null)
+      {
+        rows.Add(lastRow);
+      }
+
+      return rows;
+    }
+
+    private static bool TryBuildShinhanPreviewRow(IReadOnlyList<string> recordLines, bool trimCells, out string[]? row)
+    {
+      row = null;
+      if (recordLines.Count == 0)
+      {
+        return false;
+      }
+
+      Match dateMatch = RecordStartRegex.Match(recordLines[0]);
+      if (!dateMatch.Success)
+      {
+        return false;
+      }
+
+      string dateText = dateMatch.Groups["date"].Value;
+      List<string> tokens = new();
+
+      string firstRemainder = recordLines[0][dateMatch.Length..];
+      tokens.AddRange(SplitShinhanTokens(firstRemainder));
+
+      foreach (string line in recordLines.Skip(1))
+      {
+        tokens.AddRange(SplitShinhanTokens(line));
+      }
+
+      if (tokens.Count == 0)
+      {
+        return false;
+      }
+
+      int merchantStartIndex = 0;
+      string useCard = tokens[0];
+      if (tokens.Count > 1 && ShinhanCardSuffixRegex.IsMatch(tokens[1]))
+      {
+        useCard = $"{tokens[0]} {tokens[1]}";
+        merchantStartIndex = 2;
+      }
+      else
+      {
+        merchantStartIndex = 1;
+      }
+
+      int amountIndex = -1;
+      for (int i = merchantStartIndex; i < tokens.Count; i++)
+      {
+        if (TryParseMoney(tokens[i], out _))
+        {
+          amountIndex = i;
+          break;
+        }
+      }
+
+      if (amountIndex < 0)
+      {
+        return false;
+      }
+
+      string merchant = string.Join(" ", tokens.Skip(merchantStartIndex).Take(amountIndex - merchantStartIndex)).Trim();
+      if (string.IsNullOrWhiteSpace(merchant))
+      {
+        return false;
+      }
+
+      string amount = tokens[amountIndex];
+      int cursor = amountIndex + 1;
+      string division = string.Empty;
+
+      if (cursor < tokens.Count && LooksLikeNongHyupDivision(tokens[cursor]))
+      {
+        division = tokens[cursor++];
+      }
+
+      List<decimal> trailingMoney = new();
+      for (int i = cursor; i < tokens.Count; i++)
+      {
+        if (TryParseMoney(tokens[i], out decimal money))
+        {
+          trailingMoney.Add(money);
+        }
+      }
+
+      decimal amountValue = 0m;
+      TryParseMoney(amount, out amountValue);
+
+      decimal principal = 0m;
+      decimal fee = 0m;
+      decimal balance = 0m;
+
+      if (!string.IsNullOrWhiteSpace(division))
+      {
+        if (trailingMoney.Count >= 1)
+        {
+          principal = trailingMoney[0];
+        }
+
+        if (trailingMoney.Count >= 3)
+        {
+          fee = trailingMoney[1];
+          balance = trailingMoney[2];
+        }
+        else if (trailingMoney.Count == 2)
+        {
+          if (trailingMoney[1] > principal)
+          {
+            balance = trailingMoney[1];
+          }
+          else
+          {
+            fee = trailingMoney[1];
+          }
+        }
+      }
+      else
+      {
+        if (trailingMoney.Count == 0)
+        {
+          principal = amountValue;
+        }
+        else
+        {
+          principal = trailingMoney[0];
+          if (trailingMoney.Count >= 2)
+          {
+            fee = trailingMoney[1];
+          }
+
+          if (trailingMoney.Count >= 3)
+          {
+            balance = trailingMoney[2];
+          }
+        }
+      }
+
+      if (amountValue == 0m && principal > 0m)
+      {
+        amountValue = principal;
+      }
+
+      row =
+      [
+        PrepareCell(dateText, trimCells),
+        PrepareCell(useCard, trimCells),
+        PrepareCell(merchant, trimCells),
+        PrepareCell(amountValue == 0m ? string.Empty : amountValue.ToString("#,##0", CultureInfo.InvariantCulture), trimCells),
+        PrepareCell(division, trimCells),
+        PrepareCell(principal == 0m ? string.Empty : principal.ToString("#,##0", CultureInfo.InvariantCulture), trimCells),
+        PrepareCell(fee == 0m ? string.Empty : fee.ToString("#,##0", CultureInfo.InvariantCulture), trimCells),
+        PrepareCell(balance == 0m ? string.Empty : balance.ToString("#,##0", CultureInfo.InvariantCulture), trimCells)
+      ];
+
+      return true;
+    }
+
+    private static IEnumerable<string> SplitShinhanTokens(string line)
+    {
+      return SplitColumns(line, null, new[] { new DelimiterRule { Kind = DelimiterKind.Tab, RepeatCount = 1, Enabled = true } })
+        .Select(x => x.Trim())
+        .Where(x => !string.IsNullOrWhiteSpace(x));
+    }
+
+    private static bool IsShinhanSummaryLine(string line)
+    {
+      string normalized = line.Replace(" ", string.Empty).Replace("\u3000", string.Empty);
+      return normalized.Contains("합계", StringComparison.Ordinal)
+        || normalized.Contains("소계", StringComparison.Ordinal)
+        || normalized.Contains("총합계", StringComparison.Ordinal);
+    }
+
+    private static bool IsKbLoanRecordStart(string line)
+    {
+      return KbLoanStartRegex.IsMatch(line.Trim());
+    }
+
+    private static List<string[]> BuildMultiLineRecordPreviewRows(
+      string rawText,
+      string? rowExpression,
+      IReadOnlyList<DelimiterRule>? rowRules,
+      string? columnExpression,
+      IReadOnlyList<DelimiterRule>? columnRules,
+      bool trimRows,
+      bool trimCells)
+    {
+      List<string> rows = SplitRows(rawText, rowExpression, rowRules);
+      List<string[]> previewRows = new();
+      List<string>? current = null;
+
+      foreach (string raw in rows)
+      {
+        string line = PrepareRow(raw, trimRows);
+        if (string.IsNullOrWhiteSpace(line) || IsHeaderLine(line))
+        {
+          continue;
+        }
+
+        if (RecordStartRegex.IsMatch(line) || IsKbLoanRecordStart(line))
+        {
+          if (current is { Count: > 0 })
+          {
+            previewRows.Add(FlattenPreviewRecord(current, columnExpression, columnRules, trimCells));
+          }
+
+          current = new List<string> { line };
+          continue;
+        }
+
+        current ??= new List<string>();
+        current.Add(line);
+      }
+
+      if (current is { Count: > 0 })
+      {
+        previewRows.Add(FlattenPreviewRecord(current, columnExpression, columnRules, trimCells));
+      }
+
+      return previewRows;
+    }
+
+    private static string[] FlattenPreviewRecord(
+      IReadOnlyList<string> recordLines,
+      string? columnExpression,
+      IReadOnlyList<DelimiterRule>? columnRules,
+      bool trimCells)
+    {
+      string flattened = string.Join("\t", recordLines);
+      return SplitColumns(flattened, columnExpression, columnRules)
+        .Select(cell => PrepareCell(cell, trimCells))
+        .Where(cell => !string.IsNullOrWhiteSpace(cell))
+        .ToArray();
     }
 
     /// <summary>
@@ -433,7 +895,7 @@ namespace CreditCardStatement_Ver2.Code
           continue;
         }
 
-        if (RecordStartRegex.IsMatch(line))
+        if (RecordStartRegex.IsMatch(line) || IsKbLoanRecordStart(line))
         {
           if (current is { Count: > 0 })
           {
@@ -586,12 +1048,18 @@ namespace CreditCardStatement_Ver2.Code
         return false;
       }
 
+      if (IsKbLoanRecordStart(recordLines[0]))
+      {
+        return TryCreateKbLoanTransaction(recordLines, companyName, statementYearMonth, out transaction);
+      }
+
       string[] firstLineParts = SplitColumns(recordLines[0], columnExpression, columnRules).Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
-      if (firstLineParts.Length < 4 || !TryParseDate(firstLineParts[0], out DateTime useDate))
+      if (firstLineParts.Length < 4)
       {
         return false;
       }
 
+      DateTime useDate;
       string useCard = firstLineParts.ElementAtOrDefault(1) ?? string.Empty;
       string divisionText = firstLineParts.ElementAtOrDefault(2) ?? string.Empty;
       string merchant = string.Join(" ", firstLineParts.Skip(3)).Trim();
@@ -611,6 +1079,11 @@ namespace CreditCardStatement_Ver2.Code
         return false;
       }
 
+      if (!TryParseDate(firstLineParts[0], statementYearMonth, installmentTurn, out useDate))
+      {
+        return false;
+      }
+
       transaction = new CardTransaction
       {
         StatementYearMonth = statementYearMonth,
@@ -619,6 +1092,94 @@ namespace CreditCardStatement_Ver2.Code
         CardCompany = companyName,
         Merchant = merchant,
         UseAmount = useAmount,
+        InstallmentMonths = installmentMonths,
+        InstallmentTurn = installmentTurn,
+        Principal = principal,
+        Fee = fee,
+        BalanceAfterPayment = balance
+      };
+
+      return true;
+    }
+
+    private static bool TryCreateKbLoanTransaction(
+      IReadOnlyList<string> recordLines,
+      string companyName,
+      string statementYearMonth,
+      out CardTransaction? transaction)
+    {
+      transaction = null;
+      if (recordLines.Count < 3)
+      {
+        return false;
+      }
+
+      List<string> tokens = recordLines
+        .SelectMany(line => Regex.Split(line.Trim(), @"\s+"))
+        .Where(x => !string.IsNullOrWhiteSpace(x))
+        .ToList();
+
+      if (tokens.Count < 10 || !IsKbLoanRecordStart(tokens[0]))
+      {
+        return false;
+      }
+
+      string loanNumber = tokens[0];
+      if (!TryReadMoney(tokens, 1, out decimal approvedAmount, out int cursor))
+      {
+        return false;
+      }
+
+      if (cursor + 1 >= tokens.Count)
+      {
+        return false;
+      }
+
+      string startDateText = tokens[cursor++];
+      string maturityDateText = tokens[cursor++];
+      string useCard = cursor < tokens.Count ? tokens[cursor++] : string.Empty;
+      if (cursor < tokens.Count && !TryParseMoney(tokens[cursor], out _) && !RecordStartRegex.IsMatch(tokens[cursor]))
+      {
+        useCard = string.IsNullOrWhiteSpace(useCard) ? tokens[cursor] : $"{useCard} {tokens[cursor]}";
+        cursor++;
+      }
+
+      string paymentDateText = cursor < tokens.Count ? tokens[cursor++] : string.Empty;
+
+      if (!TryReadMoney(tokens, cursor, out decimal principal, out cursor))
+      {
+        return false;
+      }
+
+      decimal fee = TryReadMoney(tokens, cursor, out decimal parsedFee, out int nextCursor) ? parsedFee : 0m;
+      cursor = nextCursor;
+
+      _ = TryReadMoney(tokens, cursor, out _, out nextCursor);
+      cursor = nextCursor;
+
+      int remainingTurns = TryReadInt(tokens, ref cursor, out int parsedRemainingTurns) ? parsedRemainingTurns : 0;
+      decimal balance = TryReadMoney(tokens, cursor, out decimal parsedBalance, out _) ? parsedBalance : 0m;
+
+      DateTime useDate;
+      if (!TryParseDate(paymentDateText, statementYearMonth, 1, out useDate))
+      {
+        if (!TryParseDate(startDateText, statementYearMonth, 1, out useDate))
+        {
+          return false;
+        }
+      }
+
+      int installmentMonths = remainingTurns > 0 ? remainingTurns + 1 : 1;
+      int installmentTurn = remainingTurns > 0 ? 1 : 1;
+
+      transaction = new CardTransaction
+      {
+        StatementYearMonth = statementYearMonth,
+        UseDate = useDate,
+        UseCard = useCard,
+        CardCompany = companyName,
+        Merchant = $"장기카드대출 {loanNumber}",
+        UseAmount = approvedAmount,
         InstallmentMonths = installmentMonths,
         InstallmentTurn = installmentTurn,
         Principal = principal,
@@ -648,19 +1209,28 @@ namespace CreditCardStatement_Ver2.Code
         return false;
       }
 
-      if (!TryParseDate(dateText, out DateTime useDate) || !TryParseMoney(amountText, out decimal useAmount))
+      if (!TryParseMoney(amountText, out decimal useAmount))
       {
         return false;
       }
 
       string useCard = GetColumn(columns, options.CardColumn) ?? string.Empty;
       string division = GetColumn(columns, options.DivisionColumn) ?? string.Empty;
+      string installmentMonthsText = GetColumn(columns, options.InstallmentMonthsColumn) ?? string.Empty;
+      string installmentTurnText = GetColumn(columns, options.InstallmentTurnColumn) ?? string.Empty;
       int installmentMonths = ParseIntColumn(columns, options.InstallmentMonthsColumn, 0);
       int installmentTurn = ParseIntColumn(columns, options.InstallmentTurnColumn, 0);
+      ParseInstallment(installmentMonthsText, ref installmentMonths, ref installmentTurn);
+      ParseInstallment(installmentTurnText, ref installmentMonths, ref installmentTurn);
       ParseInstallment(division, ref installmentMonths, ref installmentTurn);
       // 할부 정보는 전용 열이 비어 있어도 구분 텍스트에서 보정해 최대한 복구한다.
       installmentMonths = installmentMonths <= 0 ? 1 : installmentMonths;
       installmentTurn = installmentTurn <= 0 ? 1 : installmentTurn;
+
+      if (!TryParseDate(dateText, options.StatementYearMonth, installmentTurn, out DateTime useDate))
+      {
+        return false;
+      }
 
       transaction = new CardTransaction
       {
@@ -775,8 +1345,44 @@ namespace CreditCardStatement_Ver2.Code
     /// <summary>
     /// 지원 형식의 날짜 문자열을 <see cref="DateTime"/>으로 변환합니다.
     /// </summary>
-    private static bool TryParseDate(string text, out DateTime value)
+    private static bool TryParseDate(string text, string? statementYearMonth, int installmentTurn, out DateTime value)
     {
+      Match monthDayMatch = Regex.Match(text, @"^(?<month>\d{1,2})[./-](?<day>\d{1,2})$");
+      if (monthDayMatch.Success && TryResolveStatementMonth(statementYearMonth, out int statementYear, out int statementMonth))
+      {
+        int month = int.Parse(monthDayMatch.Groups["month"].Value, CultureInfo.InvariantCulture);
+        int day = int.Parse(monthDayMatch.Groups["day"].Value, CultureInfo.InvariantCulture);
+        int safeTurn = installmentTurn <= 0 ? 1 : installmentTurn;
+        DateTime anchorMonth = new(statementYear, statementMonth, 1);
+        DateTime estimatedUseMonth = anchorMonth.AddMonths(-(safeTurn - 1));
+        int year = estimatedUseMonth.Year;
+
+        if (safeTurn <= 1 && month != estimatedUseMonth.Month)
+        {
+          year = month > statementMonth ? statementYear - 1 : statementYear;
+        }
+        else if (safeTurn > 1)
+        {
+          if (month > estimatedUseMonth.Month && estimatedUseMonth.Month < 12)
+          {
+            year -= 1;
+          }
+          else if (month < estimatedUseMonth.Month && estimatedUseMonth.Month == 1)
+          {
+            year += 1;
+          }
+        }
+
+        try
+        {
+          value = new DateTime(year, month, day);
+          return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+        }
+      }
+
       if (DateTime.TryParseExact(text, DateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out value))
       {
         // 두 자리 연도는 2000년대 명세서로 간주해 보정한다.
@@ -789,6 +1395,31 @@ namespace CreditCardStatement_Ver2.Code
       }
 
       return DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.None, out value);
+    }
+
+    private static bool TryResolveStatementMonth(string? statementYearMonth, out int year, out int month)
+    {
+      year = 0;
+      month = 0;
+
+      if (string.IsNullOrWhiteSpace(statementYearMonth))
+      {
+        return false;
+      }
+
+      if (!DateTime.TryParseExact(
+        statementYearMonth + "-01",
+        "yyyy-MM-dd",
+        CultureInfo.InvariantCulture,
+        DateTimeStyles.None,
+        out DateTime parsed))
+      {
+        return false;
+      }
+
+      year = parsed.Year;
+      month = parsed.Month;
+      return true;
     }
 
     /// <summary>
@@ -809,11 +1440,11 @@ namespace CreditCardStatement_Ver2.Code
         return;
       }
 
-      Match slashMatch = Regex.Match(normalized, @"(?<turn>\d+)\s*/\s*(?<months>\d+)");
+      Match slashMatch = Regex.Match(normalized, @"(?<months>\d+)\s*/\s*(?<turn>\d+)");
       if (slashMatch.Success)
       {
-        turn = int.Parse(slashMatch.Groups["turn"].Value, CultureInfo.InvariantCulture);
         months = int.Parse(slashMatch.Groups["months"].Value, CultureInfo.InvariantCulture);
+        turn = int.Parse(slashMatch.Groups["turn"].Value, CultureInfo.InvariantCulture);
         return;
       }
 
@@ -848,6 +1479,14 @@ namespace CreditCardStatement_Ver2.Code
 
       value = 0m;
       return false;
+    }
+
+    private static bool TryReadMoney(IReadOnlyList<string> tokens, int startIndex, out decimal value, out int nextCursor)
+    {
+      int cursor = startIndex;
+      bool success = TryReadMoney(tokens, ref cursor, out value);
+      nextCursor = cursor;
+      return success;
     }
 
     /// <summary>

@@ -67,6 +67,7 @@ namespace CreditCardStatement_Ver2.Code
           score.Division += Has(kind, CellValueKind.Division) ? 3 : 0;
           score.Merchant += Has(kind, CellValueKind.Merchant) ? 2 : 0;
           score.Amount += Has(kind, CellValueKind.Amount) ? 2 : 0;
+          score.InstallmentCombined += Has(kind, CellValueKind.InstallmentMonth) && Has(kind, CellValueKind.InstallmentTurn) ? 3 : 0;
           score.InstallmentMonths += Has(kind, CellValueKind.InstallmentMonth) ? 1 : 0;
           score.InstallmentTurn += Has(kind, CellValueKind.InstallmentTurn) ? 1 : 0;
         }
@@ -77,6 +78,7 @@ namespace CreditCardStatement_Ver2.Code
       AssignBest(mappings, scores, x => x.Division, "구분");
       AssignBest(mappings, scores, x => x.Merchant, "가맹점");
       AssignBest(mappings, scores, x => x.Amount, "이용금액");
+      AssignBest(mappings, scores, x => x.InstallmentCombined, "할부개월/회차");
       AssignBest(mappings, scores, x => x.InstallmentMonths, "할부개월");
       AssignBest(mappings, scores, x => x.InstallmentTurn, "회차");
 
@@ -131,6 +133,7 @@ namespace CreditCardStatement_Ver2.Code
       public int Division { get; set; }
       public int Merchant { get; set; }
       public int Amount { get; set; }
+      public int InstallmentCombined { get; set; }
       public int InstallmentMonths { get; set; }
       public int InstallmentTurn { get; set; }
     }

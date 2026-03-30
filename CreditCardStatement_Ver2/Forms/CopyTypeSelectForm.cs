@@ -127,7 +127,10 @@ namespace CreditCardStatement_Ver2.Forms
 
       if (_cardTypeComboBox.SelectedItem is CardTypeItem item)
       {
-        // Keep the rest of the last-used settings intact and only change card type.
+        CardImportOptions preset = CardImportOptions.CreatePreset(item.Type);
+        preset.StatementYearMonth = _statementMonthPicker.Value.ToString("yyyy-MM");
+        ApplyPreset(preset);
+        RefreshPreview();
       }
     }
 
@@ -251,21 +254,19 @@ namespace CreditCardStatement_Ver2.Forms
         ? parserItem.Mode
         : CardParserMode.Auto;
 
-      List<string[]> previewRows = mode == CardParserMode.ExcelLike
-        ? CardImportService.BuildExcelLikePreviewRows(
-          _clipboardText,
-          _columnDelimiterTextBox.Text,
-          GetColumnRules(),
-          _trimRowsCheckBox.Checked,
-          _trimCellsCheckBox.Checked)
-        : CardImportService.BuildPreviewRows(
-          _clipboardText,
-          _rowDelimiterTextBox.Text,
-          _columnDelimiterTextBox.Text,
-          GetColumnRules(),
-          Decimal.ToInt32(_skipRowsNumeric.Value),
-          _trimRowsCheckBox.Checked,
-          _trimCellsCheckBox.Checked);
+      CardImportOptions previewOptions = new()
+      {
+        CardType = _cardTypeComboBox.SelectedItem is CardTypeItem card ? card.Type : ECardCompanyType.Generic,
+        ParserMode = mode,
+        RowDelimiterExpression = _rowDelimiterTextBox.Text,
+        ColumnDelimiterExpression = _columnDelimiterTextBox.Text,
+        ColumnDelimiterRules = GetColumnRules(),
+        TrimRows = _trimRowsCheckBox.Checked,
+        TrimCells = _trimCellsCheckBox.Checked,
+        SkipRows = Decimal.ToInt32(_skipRowsNumeric.Value)
+      };
+
+      List<string[]> previewRows = CardImportService.BuildPreviewRows(previewOptions, _clipboardText);
 
       int maxColumns = 1;
       foreach (string[] cells in previewRows)
@@ -336,6 +337,7 @@ namespace CreditCardStatement_Ver2.Forms
           FlatStyle = FlatStyle.Standard
         };
         combo.Items.AddRange(TargetFields);
+        combo.Items.Add("할부개월/회차");
         _columnMapGrid.Columns.Add(combo);
       }
 
@@ -410,8 +412,15 @@ namespace CreditCardStatement_Ver2.Forms
       AddMapping(mappings, options.DivisionColumn, "구분");
       AddMapping(mappings, options.MerchantColumn, "가맹점");
       AddMapping(mappings, options.AmountColumn, "이용금액");
-      AddMapping(mappings, options.InstallmentMonthsColumn, "할부개월");
-      AddMapping(mappings, options.InstallmentTurnColumn, "회차");
+      if (options.InstallmentMonthsColumn > 0 && options.InstallmentMonthsColumn == options.InstallmentTurnColumn)
+      {
+        AddMapping(mappings, options.InstallmentMonthsColumn, "할부개월/회차");
+      }
+      else
+      {
+        AddMapping(mappings, options.InstallmentMonthsColumn, "할부개월");
+        AddMapping(mappings, options.InstallmentTurnColumn, "회차");
+      }
       AddMapping(mappings, options.PrincipalColumn, "원금");
       AddMapping(mappings, options.FeeColumn, "수수료");
       AddMapping(mappings, options.BalanceColumn, "결제 후 잔액");
@@ -506,6 +515,10 @@ namespace CreditCardStatement_Ver2.Forms
           case "구분": options.DivisionColumn = sourceIndex; break;
           case "가맹점": options.MerchantColumn = sourceIndex; break;
           case "이용금액": options.AmountColumn = sourceIndex; break;
+          case "할부개월/회차":
+            options.InstallmentMonthsColumn = sourceIndex;
+            options.InstallmentTurnColumn = sourceIndex;
+            break;
           case "할부개월": options.InstallmentMonthsColumn = sourceIndex; break;
           case "회차": options.InstallmentTurnColumn = sourceIndex; break;
           case "원금": options.PrincipalColumn = sourceIndex; break;
